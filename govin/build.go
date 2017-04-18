@@ -6,6 +6,13 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"strconv"
+
+	"bytes"
+	"encoding/binary"
+
+	"github.com/vseledkin/bitcask"
 )
 
 /*
@@ -45,20 +52,46 @@ func LinesFrom(reader *bufio.Reader, ch chan string) {
 }
 
 func BuildText() (e error) {
+	bc, err := bitcask.Open("output", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer bc.Close()
+
 	var w sync.WaitGroup
 	lines := make(chan string, threads)
 	// read input file thread
 	go func(chan string) {
 		e = LinesFromFile(input, lines)
-		close(lines)
 	}(lines)
 
 	// vector maker thread
 	w.Add(1)
 	go func(chan string) {
+		count := 0
 		for line := range lines {
-			log.Printf("%s", line)
+
+			lineParts := strings.Fields(line)
+			var vector [128]float32
+			for i, strVal := range lineParts[1:] {
+				v, err := strconv.ParseFloat(strVal, 32)
+				if err != nil {
+					log.Println(strVal)
+				}
+				vector[i] = float32(v)
+			}
+			buf := new(bytes.Buffer)
+			err := binary.Write(buf, binary.LittleEndian, vector)
+			if err != nil {
+				log.Println(err)
+			}
+			bc.Put([]byte(lineParts[0]), buf.Bytes())
+			count++
+			if count%10000 == 0 {
+				log.Printf("Found %d vectors\n", count)
+			}
 		}
+		log.Printf("Found %d vectors total\n", count)
 		w.Done()
 	}(lines)
 	w.Wait()

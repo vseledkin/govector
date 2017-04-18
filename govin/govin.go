@@ -8,18 +8,26 @@ import (
 )
 
 const (
-	build = "build"
+	build   = "build"
+	nearest = "nearest"
 )
 
 var threads int
 var input, output string
 var cwd string
 
+var word string
+
 func main() {
 	buildCommand := flag.NewFlagSet(build, flag.ExitOnError)
 	buildCommand.StringVar(&input, "input", "", "file to load vectors from")
 	buildCommand.IntVar(&threads, "threads", 2, "paralelizm factor")
-	buildCommand.StringVar(&output, "output", "", "file to output index to")
+	buildCommand.StringVar(&output, "output", "", "dir to output index to")
+
+	nearestCommand := flag.NewFlagSet(build, flag.ExitOnError)
+	nearestCommand.StringVar(&input, "input", "", "dir to load vectors from")
+	nearestCommand.IntVar(&threads, "threads", 2, "paralelizm factor")
+	nearestCommand.StringVar(&word, "word", "", "word to search nearest to")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -27,6 +35,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "commands are:\n")
 		fmt.Fprintf(os.Stderr, "%s\n", build)
 		buildCommand.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "%s\n", nearest)
+		nearestCommand.PrintDefaults()
 
 		flag.PrintDefaults()
 	}
@@ -43,6 +53,8 @@ func main() {
 	switch os.Args[1] {
 	case build:
 		buildCommand.Parse(os.Args[2:])
+	case nearest:
+		nearestCommand.Parse(os.Args[2:])
 	default:
 		log.Printf("%q is not valid command.\n", os.Args[1])
 		os.Exit(1)
@@ -58,6 +70,16 @@ func main() {
 			output = input + ".govin"
 		}
 		BuildText()
+		return
+	}
+
+	// NEAREST COMMAND ISSUED
+	if nearestCommand.Parsed() {
+		if word == "" {
+			nearestCommand.PrintDefaults()
+			return
+		}
+		Nearest()
 		return
 	}
 }
