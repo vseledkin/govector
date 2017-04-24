@@ -2,15 +2,13 @@ package main
 
 import (
 	"bufio"
-	"log"
-	"os"
-	"strings"
-	"sync"
-
-	"strconv"
-
 	"bytes"
 	"encoding/binary"
+	"log"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/vseledkin/bitcask"
 )
@@ -52,8 +50,9 @@ func LinesFrom(reader *bufio.Reader, ch chan string) {
 }
 
 func BuildText() (e error) {
-	bc, err := bitcask.Open("output", nil)
+	bc, err := bitcask.Open(output, nil)
 	if err != nil {
+		log.Printf("Problem opening output directory %s", output)
 		log.Fatal(err)
 	}
 	defer bc.Close()

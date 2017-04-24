@@ -5,32 +5,43 @@ import (
 
 	"time"
 
-	"bytes"
-	"encoding/binary"
-
-	"github.com/vseledkin/bitcask"
+	"github.com/vseledkin/govector"
 )
 
 func Nearest() (e error) {
-	bc, err := bitcask.Open(input, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer bc.Close()
-	start := time.Now()
-	byteval, e := bc.Get([]byte(word))
+	var manifold *govector.Manifold
+	manifold, e = govector.NewManifold(input)
 	if e != nil {
 		log.Printf("Error %s", e)
+		return
 	}
-	var vector [128]float32
-	buf := bytes.NewReader(byteval)
-	e = binary.Read(buf, binary.LittleEndian, &vector)
+	e = manifold.Open()
+	defer func() {
+		manifold.Close()
+	}()
 	if e != nil {
-		log.Println("binary.Read failed:", e)
+		log.Printf("Error %s", e)
+		return
+	}
+	start := time.Now()
+	var vector []float32
+	vector, e = manifold.GetVector(word)
+	if e != nil {
+		log.Printf("Error %s", e)
+		return
 	}
 
-	log.Printf("%s\n%v\n", word, byteval)
 	log.Printf("%s\n%v\n%s\n", word, vector, time.Now().Sub(start))
+
+	manifold.Visit(func(key string) {
+		vector, e = manifold.GetVector(key)
+		if e != nil {
+			log.Printf("Error %s", e)
+			return
+		}
+
+		log.Printf(key, vector)
+	})
 
 	return
 }

@@ -48,6 +48,17 @@ func (m *Manifold) GetVector(s string) (v []float32, e error) {
 	return
 }
 
+func (m *Manifold) getVector(s []byte) (v []float32, e error) {
+	var vector [128]float32
+	buf := bytes.NewReader(s)
+	e = binary.Read(buf, binary.LittleEndian, &vector)
+	if e != nil {
+		log.Println("Cannot deserialize to vector %s", e)
+	}
+	v = vector[:]
+	return
+}
+
 func (m *Manifold) Dim() int {
 	return 128
 }
@@ -56,6 +67,21 @@ func (m *Manifold) HasWord(s string) bool {
 	return m.bc.HasKey(s)
 }
 
-func (m *Manifold) Visit(visitor func(key string)) {
-	m.bc.Visit(visitor)
+func (m *Manifold) VisitKeys(visitor func(key string)) {
+	m.bc.VisitKeys(func(bcKey []byte) {
+		visitor(string(bcKey))
+	})
+}
+
+func (m *Manifold) VisitFast(visitor func(key string, vector []float32)) {
+	m.bc.VisitKeysAndValues(func(bcKey, bcValue []byte) {
+		v, e := m.getVector(bcValue)
+		if e == nil {
+			visitor(string(bcKey), v)
+		}
+	})
+}
+
+func (m *Manifold) Count() int {
+	return m.bc.Count()
 }
