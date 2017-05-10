@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/vseledkin/bitcask"
+	"github.com/vseledkin/govector"
 )
 
 /*
@@ -79,6 +80,9 @@ func BuildText() (e error) {
 				}
 				vector[i] = float32(v)
 			}
+			// normalize vector
+
+			govector.Sscale(1/govector.L2(vector[:]), vector[:])
 			buf := new(bytes.Buffer)
 			err := binary.Write(buf, binary.LittleEndian, vector)
 			if err != nil {
