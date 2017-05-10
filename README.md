@@ -1,2 +1,2 @@
 # govector
-dense file based vector index
+file based dense vector index
