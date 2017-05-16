@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	build   = "build"
-	nearest = "nearest"
+	build    = "build"
+	build_ft = "build_ft"
+	nearest  = "nearest"
 )
 
 var threads int
@@ -24,6 +25,11 @@ func main() {
 	buildCommand.IntVar(&threads, "threads", 2, "paralelizm factor")
 	buildCommand.StringVar(&output, "output", "", "dir to output index to")
 
+	buildFtCommand := flag.NewFlagSet(build_ft, flag.ExitOnError)
+	buildFtCommand.StringVar(&input, "input", "", "file to load fast text vectors from")
+	buildFtCommand.IntVar(&threads, "threads", 2, "paralelizm factor")
+	buildFtCommand.StringVar(&output, "output", "", "dir to output index to")
+
 	nearestCommand := flag.NewFlagSet(build, flag.ExitOnError)
 	nearestCommand.StringVar(&input, "input", "", "dir to load vectors from")
 	nearestCommand.IntVar(&threads, "threads", 2, "paralelizm factor")
@@ -33,8 +39,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "utility <command> arguments\n")
 		fmt.Fprintf(os.Stderr, "commands are:\n")
+
 		fmt.Fprintf(os.Stderr, "%s\n", build)
 		buildCommand.PrintDefaults()
+
+		fmt.Fprintf(os.Stderr, "%s\n", build_ft)
+		buildFtCommand.PrintDefaults()
+
 		fmt.Fprintf(os.Stderr, "%s\n", nearest)
 		nearestCommand.PrintDefaults()
 
@@ -53,6 +64,8 @@ func main() {
 	switch os.Args[1] {
 	case build:
 		buildCommand.Parse(os.Args[2:])
+	case build_ft:
+		buildFtCommand.Parse(os.Args[2:])
 	case nearest:
 		nearestCommand.Parse(os.Args[2:])
 	default:
@@ -70,6 +83,19 @@ func main() {
 			output = input + ".govin"
 		}
 		BuildText()
+		return
+	}
+
+	// BUILD FT COMMAND ISSUED
+	if buildFtCommand.Parsed() {
+		if input == "" {
+			buildFtCommand.PrintDefaults()
+			return
+		}
+		if output == "" {
+			output = input + ".govin"
+		}
+		BuildFastText()
 		return
 	}
 
