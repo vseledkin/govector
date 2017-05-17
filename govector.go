@@ -3,7 +3,7 @@ package govector
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
+
 	"log"
 	"math"
 	"os"
@@ -49,25 +49,32 @@ func (m *Manifold) Close() {
 
 var CacheHit, CacheMiss int
 
-func (m *Manifold) ComputeNGrams(s string) (ngrams []string) {
-	minn, maxn := 3, 6
-	runes := []rune(s)
-	for i := 0; i < len(runes); i++ {
-		ngram := ""
+func сomputeNGrams(s string, minn, maxn int) (ngrams []string) {
 
-		for j, n := i, 1; j < len(runes) && n <= maxn; n++ {
+	runes := []rune(s)
+	L := len(runes)
+	for i := 0; i < L; i++ {
+		ngram := ""
+		if (runes[i] & 0xC0) == 0x80 {
+			continue
+		}
+		for j, n := i, 1; j < L && n <= maxn; n++ {
 			ngram += string(runes[j])
 			j++
-			for j < len(runes) {
+			for j < L && (runes[j]&0xC0) == 0x80 {
 				ngram += string(runes[j])
 				j++
 			}
-			if n >= minn && !(n == 1 && (i == 0 || j == len(runes))) {
+			if n >= minn && !(n == 1 && (i == 0 || j == L)) {
 				ngrams = append(ngrams, ngram)
 			}
 		}
 	}
 	return
+}
+
+func (m *Manifold) ComputeNGrams(s string) (ngrams []string) {
+	return сomputeNGrams(s, 3, 6)
 }
 
 func (m *Manifold) GetVector(s string) (v []float32, e error) {
@@ -78,18 +85,43 @@ func (m *Manifold) GetVector(s string) (v []float32, e error) {
 		return vv.([]float32), nil
 	}
 	//log.Printf("Miss %s %d", s, m.cache.ItemCount())
-	byteval, e := m.bc.Get([]byte("0" + s))
-
-	if e == nil {
-		//log.Printf("String %s not found in dictionary: %s", s, e)
+	var byteval []byte
+	if byteval, e = m.bc.Get([]byte("0" + s)); e == nil {
 		v, e = m.getVector(byteval)
 		if e != nil {
-			log.Printf("Cannot get word vector %s %s", s, e)
+			log.Printf("Cannot get word vector %s %s", string(byteval), e)
+			return
 		}
+		//log.Printf("Word: %s %#v", s, v)
+	} else{
+		// no word found, not error so reset it
+		e = nil
 	}
 
-	ngrams := m.ComputeNGrams("<" + s + ">")
-	fmt.Printf("%#v", ngrams)
+
+	for _, ngram := range m.ComputeNGrams("<" + s + ">") {
+		if byteval, e = m.bc.Get([]byte("1" + ngram)); e == nil {
+			var nv []float32
+			if nv, e = m.getVector(byteval); e != nil {
+				log.Printf("Cannot get word vector %s %s", string(byteval), e)
+				return
+			} else {
+				//log.Printf("NGram: %s %#v", ngram, nv)
+				// we got ngram vector
+				if len(v) > 0 {
+					Sxpy(nv, v)
+				} else {
+					v = nv
+				}
+			}
+		}
+		e = nil
+	}
+	// normalize
+	if len(v) > 0 {
+		Sscale(1/L2(v), v)
+	}
+	//log.Printf("Vector: %s %#v", s, v)
 	CacheMiss++
 	m.cache.Add(s, v, time.Second)
 	return
