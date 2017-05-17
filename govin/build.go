@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/boltdb/bolt"
 	"github.com/vseledkin/bitcask"
 	"github.com/vseledkin/govector"
 )
@@ -102,12 +105,14 @@ func BuildText() (e error) {
 }
 
 func BuildFastText() (e error) {
-	bc, err := bitcask.Open(output, nil)
+
+	db, err := bolt.Open(output, 0600, &bolt.Options{Timeout: 1 * time.Second})
+
 	if err != nil {
-		log.Printf("Problem opening output directory %s", output)
+		log.Printf("Problem opening db %s", output)
 		log.Fatal(err)
 	}
-	defer bc.Close()
+	defer db.Close()
 
 	var w sync.WaitGroup
 	lines := make(chan string, threads)
@@ -120,8 +125,34 @@ func BuildFastText() (e error) {
 	w.Add(1)
 	go func(chan string) {
 		count := 0
-		var wordCount, nGramCount uint32
+		var wordCount, nGramCount, wGramCount uint32
 
+		type value struct {
+			k []byte
+			v []byte
+		}
+		var values []value
+		write := func() {
+
+			err = db.Update(func(tx *bolt.Tx) error {
+				b, e := tx.CreateBucketIfNotExists([]byte(govector.WORDS_BUCKET))
+				if e != nil {
+					return fmt.Errorf("create bucket error: %s", e)
+				}
+				for _, v := range values {
+					if e = b.Put(v.k, v.v); e != nil {
+						return e
+					}
+				}
+				return nil // commit transaction
+			})
+			if err != nil {
+				log.Panicln("error", err)
+				panic(err)
+			}
+			values = values[:0]
+
+		}
 		for line := range lines {
 
 			lineParts := strings.Fields(line)
@@ -131,59 +162,96 @@ func BuildFastText() (e error) {
 				v, err := strconv.ParseFloat(strVal, 32)
 				if err != nil {
 					log.Println(err, strVal)
-					log.Fatal(err)
+					panic(err)
 				}
 				vector[i] = float32(v)
 			}
 			// normalize vector
 
-			govector.Sscale(1/govector.L2(vector[:]), vector[:])
+			//govector.Sscale(1/govector.L2(vector[:]), vector[:])
 			buf := new(bytes.Buffer)
 			err := binary.Write(buf, binary.LittleEndian, vector)
 			if err != nil {
 				log.Println(err)
-				log.Fatal(err)
+				panic(err)
 			}
-			if lineParts[0] == "@WoRd" {
-				if err = bc.Put([]byte("0"+lineParts[1]), buf.Bytes()); err != nil { // word
-					log.Fatal(err)
-				}
+			switch lineParts[0] {
+			case "@FWoRd":
+				values = append(values, value{[]byte("0" + lineParts[1]), buf.Bytes()})
 				wordCount++
-			} else {
-				if err = bc.Put([]byte("1"+lineParts[1]), buf.Bytes()); err != nil { // n-gram
-					log.Fatal(err)
-				}
+			case "@WoRd":
+				values = append(values, value{[]byte("1" + lineParts[1]), buf.Bytes()})
+				wGramCount++
+			case "@NgRaM":
+				values = append(values, value{[]byte("2" + lineParts[1]), buf.Bytes()})
 				nGramCount++
+			default:
+				panic(fmt.Errorf("Wrong format %s", lineParts[0]))
 			}
 
+			if len(values) == 100000 {
+				write()
+			}
 			count++
 			if count%10000 == 0 {
-				log.Printf("Found %d vectors\n", count)
+				log.Printf("Found %d vectors %d words %d ngrams %d wgrams\n", count, wordCount, nGramCount, wGramCount)
 			}
 		}
+		if len(values) > 0 {
+			write()
+		}
 		// write wordcount
-		buf := new(bytes.Buffer)
-		err := binary.Write(buf, binary.LittleEndian, wordCount)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err = bc.Put([]byte(govector.WORD_COUNT_KEY), buf.Bytes()); err != nil {
-			log.Fatal(err)
-		}
+		err = db.Update(func(tx *bolt.Tx) error {
+			b, e := tx.CreateBucketIfNotExists([]byte(govector.WORDS_BUCKET))
 
-		// write ngramcount
-		buf = new(bytes.Buffer)
-		err = binary.Write(buf, binary.LittleEndian, nGramCount)
+			if e != nil {
+				return fmt.Errorf("create bucket error: %s", e)
+			}
+			buf := new(bytes.Buffer)
+			err := binary.Write(buf, binary.LittleEndian, wordCount)
+			if err != nil {
+				log.Fatal(err)
+				return err
+			}
+			if err = b.Put([]byte(govector.WORD_COUNT_KEY), buf.Bytes()); err != nil {
+				log.Fatal(err)
+				return err
+			}
+
+			// write ngramcount
+			buf = new(bytes.Buffer)
+			err = binary.Write(buf, binary.LittleEndian, nGramCount)
+			if err != nil {
+				log.Fatal(err)
+				return err
+			}
+			if err = b.Put([]byte(govector.NGRAM_COUNT_KEY), buf.Bytes()); err != nil {
+				log.Fatal(err)
+				return err
+			}
+
+			buf = new(bytes.Buffer)
+			err = binary.Write(buf, binary.LittleEndian, wGramCount)
+			if err != nil {
+				log.Fatal(err)
+				return err
+			}
+			if err = b.Put([]byte(govector.WGRAM_COUNT_KEY), buf.Bytes()); err != nil {
+				log.Fatal(err)
+				return err
+			}
+
+			return nil // commit transaction
+		})
 		if err != nil {
-			log.Fatal(err)
-		}
-		if err = bc.Put([]byte(govector.NGRAM_COUNT_KEY), buf.Bytes()); err != nil {
 			log.Fatal(err)
 		}
 
 		log.Printf("Found %d vectors total\n", count)
 		log.Printf("Found %d words total\n", wordCount)
 		log.Printf("Found %d n-grams total\n", nGramCount)
+		log.Printf("Found %d wn-grams total\n", wGramCount)
+
 		w.Done()
 	}(lines)
 	w.Wait()

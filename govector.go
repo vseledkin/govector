@@ -3,14 +3,15 @@ package govector
 import (
 	"bytes"
 	"encoding/binary"
-
+	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
 	"runtime/debug"
 	"time"
 
-	"github.com/vseledkin/bitcask"
+	"github.com/boltdb/bolt"
 	"github.com/vseledkin/go-cache"
 	"github.com/vseledkin/govector/index"
 )
@@ -18,20 +19,23 @@ import (
 const (
 	WORD_COUNT_KEY  = "3_WordCount_"
 	NGRAM_COUNT_KEY = "3_NGramCount_"
+	WGRAM_COUNT_KEY = "3_WGramCount_"
+
+	WORDS_BUCKET = "WORDS_BUCKET"
 )
 
 type Manifold struct {
-	dir   string
-	bc    *bitcask.BitCask
-	cache *cache.Cache
+	dbfile string
+	bc     *bolt.DB
+	cache  *cache.Cache
 	//c := cache.New(5*time.Minute, 30*time.Second)
 }
 
-func NewManifold(dir string) (*Manifold, error) {
-	_, err := os.Stat(dir)
+func NewManifold(dbfile string) (*Manifold, error) {
+	_, err := os.Stat(dbfile)
 	if err == nil {
 		manifold := new(Manifold)
-		manifold.dir = dir
+		manifold.dbfile = dbfile
 		manifold.cache = cache.New(time.Second, 30*time.Second)
 		return manifold, nil
 	}
@@ -39,7 +43,7 @@ func NewManifold(dir string) (*Manifold, error) {
 }
 
 func (m *Manifold) Open() (err error) {
-	m.bc, err = bitcask.Open(m.dir, nil)
+	m.bc, err = bolt.Open(m.dbfile, 0600, &bolt.Options{ReadOnly: true, Timeout: 10 * time.Second})
 	return
 }
 
@@ -77,7 +81,20 @@ func (m *Manifold) ComputeNGrams(s string) (ngrams []string) {
 	return сomputeNGrams(s, 3, 6)
 }
 
+func (m *Manifold) llget(key []byte) (v []byte, err error) {
+	err = m.bc.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(WORDS_BUCKET))
+		if b == nil {
+			return fmt.Errorf("bucket %s not found", WORDS_BUCKET)
+		}
+		v = b.Get(key)
+		return nil
+	})
+	return
+}
+
 func (m *Manifold) GetVector(s string) (v []float32, e error) {
+	println("GET", s)
 	vv, found := m.cache.Get(s)
 	if found {
 		CacheHit++
@@ -86,53 +103,77 @@ func (m *Manifold) GetVector(s string) (v []float32, e error) {
 	}
 	//log.Printf("Miss %s %d", s, m.cache.ItemCount())
 	var byteval []byte
-	if byteval, e = m.bc.Get([]byte("0" + s)); e == nil {
-		v, e = m.getVector(byteval)
-		if e != nil {
-			log.Printf("Cannot get word vector %s %s", string(byteval), e)
+	if byteval, e = m.llget([]byte("0" + s)); e == nil {
+		v, e = m.decodeVector(byteval)
+		if e == nil {
+			// got precomputed vector
+
+		}
+		if e != io.EOF {
+			log.Printf("Cannot 0 get word vector [%s] %s", string(byteval), e)
 			return
 		}
-		//log.Printf("Word: %s %#v", s, v)
-	} else{
-		// no word found, not error so reset it
-		e = nil
-	}
+	} else {
+		// no precomputed vector found
+		// get wGram
+		if byteval, e = m.llget([]byte("1" + s)); e == nil {
+			v, e = m.decodeVector(byteval)
 
-
-	for _, ngram := range m.ComputeNGrams("<" + s + ">") {
-		if byteval, e = m.bc.Get([]byte("1" + ngram)); e == nil {
-			var nv []float32
-			if nv, e = m.getVector(byteval); e != nil {
-				log.Printf("Cannot get word vector %s %s", string(byteval), e)
+			if e != nil && e != io.EOF {
+				log.Printf("Cannot 1 get word vector [%s] %s", string(byteval), e)
 				return
-			} else {
-				//log.Printf("NGram: %s %#v", ngram, nv)
-				// we got ngram vector
-				if len(v) > 0 {
-					Sxpy(nv, v)
+			}
+			if e == io.EOF {
+				e = nil
+			}
+			log.Printf("VGram: %s %#v", s, v[:6])
+			// got vGram vector vector
+		}
+		// get ngrams
+		for _, ngram := range m.ComputeNGrams("<" + s + ">") {
+			if byteval, e = m.llget([]byte("2" + ngram)); e == nil {
+				var nv []float32
+				if nv, e = m.decodeVector(byteval); e != nil && e != io.EOF {
+					log.Printf("Cannot 2 get word vector %s %s", string(byteval), e)
+					return
 				} else {
-					v = nv
+					if e == io.EOF {
+						e = nil
+						// not found
+					} else {
+						log.Printf("NGram: %s %#v", ngram, nv[:6])
+						// we got ngram vector
+						if len(v) > 0 {
+							Sxpy(nv, v)
+						} else {
+							v = nv
+						}
+					}
 				}
 			}
 		}
+
+		// normalize
+		if len(v) > 0 {
+			Sscale(1/L2(v), v)
+		}
+
+		log.Printf("Word: %s %#v", s, v)
 		e = nil
 	}
-	// normalize
-	if len(v) > 0 {
-		Sscale(1/L2(v), v)
-	}
+
 	//log.Printf("Vector: %s %#v", s, v)
 	CacheMiss++
 	m.cache.Add(s, v, time.Second)
 	return
 }
 
-func (m *Manifold) getVector(s []byte) (v []float32, e error) {
+func (m *Manifold) decodeVector(vb []byte) (v []float32, e error) {
 	var vector [128]float32
-	buf := bytes.NewReader(s)
-	e = binary.Read(buf, binary.LittleEndian, &vector)
-	if e != nil {
-		log.Println("Cannot deserialize to vector value with key", string(s), e)
+	buf := bytes.NewReader(vb)
+
+	if e = binary.Read(buf, binary.LittleEndian, &vector); e != nil {
+		return
 	}
 	v = vector[:]
 	return
@@ -143,47 +184,86 @@ func (m *Manifold) Dim() int {
 }
 
 func (m *Manifold) HasWord(s string) bool {
-	return m.bc.HasKey("0" + s)
+	v, _ := m.llget([]byte("0" + s))
+	return v != nil
+}
+
+func (m *Manifold) HasWGram(s string) bool {
+	v, _ := m.llget([]byte("1" + s))
+	return v != nil
 }
 
 func (m *Manifold) HasNGram(s string) bool {
-	return m.bc.HasKey("1" + s)
+	v, _ := m.llget([]byte("2" + s))
+	return v != nil
 }
 
+/*
 func (m *Manifold) VisitKeys(visitor func(key string)) {
-	m.bc.VisitKeys(func(bcKey []byte) {
-		visitor(string(bcKey))
+	m.bc.View(func(tx *bolt.Tx) error {
+		// Assume bucket exists and has keys
+		b := tx.Bucket([]byte(WORDS_BUCKET))
+
+		b.ForEach(func(k, _ []byte) error {
+			visitor(string(k))
+			return nil
+		})
+		return nil
 	})
-}
+}*/
 
 func (m *Manifold) VisitWords(visitor func(key string, vector []float32)) {
-	m.bc.VisitKeysAndValues(func(bcKey, bcValue []byte) {
-		if bcKey[0] == '0' {
-			v, e := m.getVector(bcValue)
-			if e == nil {
-				visitor(string(bcKey[1:]), v)
+	m.bc.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(WORDS_BUCKET))
+		b.ForEach(func(k, v []byte) error {
+			if k[0] == '0' {
+				if vector, e := m.decodeVector(v); e == nil {
+					visitor(string(k[1:]), vector)
+				}
 			}
-		}
+			return nil
+		})
+		return nil
 	})
 }
 
 func (m *Manifold) VisitNGrams(visitor func(key string, vector []float32)) {
-	m.bc.VisitKeysAndValues(func(bcKey, bcValue []byte) {
-		if bcKey[0] == '1' {
-			v, e := m.getVector(bcValue)
-			if e == nil {
-				visitor(string(bcKey[1:]), v)
+	m.bc.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(WORDS_BUCKET))
+		b.ForEach(func(k, v []byte) error {
+			if k[0] == '2' {
+				if vector, e := m.decodeVector(v); e == nil {
+					visitor(string(k[1:]), vector)
+				}
 			}
-		}
+			return nil
+		})
+		return nil
 	})
 }
 
-func (m *Manifold) Count() int {
-	return m.bc.Count()
+func (m *Manifold) VisitWGrams(visitor func(key string, vector []float32)) {
+	m.bc.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(WORDS_BUCKET))
+		b.ForEach(func(k, v []byte) error {
+			if k[0] == '1' {
+				if vector, e := m.decodeVector(v); e == nil {
+					visitor(string(k[1:]), vector)
+				}
+			}
+			return nil
+		})
+		return nil
+	})
+}
+
+func (m *Manifold) Count() (count uint32) {
+	return m.WordCount() + m.NGramCount()
+
 }
 
 func (m *Manifold) WordCount() (count uint32) {
-	b, e := m.bc.Get([]byte(WORD_COUNT_KEY))
+	b, e := m.llget([]byte(WORD_COUNT_KEY))
 	if e != nil {
 		panic(e)
 	}
@@ -196,7 +276,20 @@ func (m *Manifold) WordCount() (count uint32) {
 }
 
 func (m *Manifold) NGramCount() (count uint32) {
-	b, e := m.bc.Get([]byte(NGRAM_COUNT_KEY))
+	b, e := m.llget([]byte(NGRAM_COUNT_KEY))
+	if e != nil {
+		panic(e)
+	}
+	buf := bytes.NewReader(b)
+	e = binary.Read(buf, binary.LittleEndian, &count)
+	if e != nil {
+		panic(e)
+	}
+	return count
+}
+
+func (m *Manifold) WGramCount() (count uint32) {
+	b, e := m.llget([]byte(WGRAM_COUNT_KEY))
 	if e != nil {
 		panic(e)
 	}
@@ -229,7 +322,7 @@ func (m *Manifold) AngularStr(x, y string) float32 {
 func (m *Manifold) MakeVPIndex() *index.VPTree {
 	keys := make([]string, m.Count())
 	i := 0
-	m.VisitKeys(func(key string) {
+	m.VisitWords(func(key string, _ []float32) {
 		keys[i] = key
 		i++
 	})
