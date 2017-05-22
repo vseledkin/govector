@@ -7,8 +7,8 @@ import (
 )
 
 func TestGet(t *testing.T) {
-	//m, e := NewManifold("/Volumes/data/fasttextmodel/RUEVENTOS/ru.47GB.skipgram.d128.w7.mc5.neg10.e10.b5e6")
-	m, e := NewManifold("/Users/vseledkin/ru.47GB.skipgram.d128.w7.mc5.neg10.e10.b5e6")
+	m, e := NewManifold("/Volumes/data/fasttextmodel/RUEVENTOS/mmmooo")
+	//m, e := NewManifold("/Users/vseledkin/ru.47GB.skipgram.d128.w7.mc5.neg10.e10.b5e6")
 	if e != nil {
 		t.Fatal(fmt.Errorf("Invalid govector directory: [%s]", e))
 	}

@@ -10,9 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/boltdb/bolt"
 	"github.com/vseledkin/bitcask"
 	"github.com/vseledkin/govector"
 )
@@ -105,15 +103,28 @@ func BuildText() (e error) {
 }
 
 func BuildFastText() (e error) {
-
-	db, err := bolt.Open(output, 0600, &bolt.Options{Timeout: 1 * time.Second})
-
+	f, err := os.Create(output)
 	if err != nil {
-		log.Printf("Problem opening db %s", output)
+		log.Printf("Problem opening file %s", output)
 		log.Fatal(err)
 	}
-	defer db.Close()
 
+	// write total
+	// write words
+	// write wgrams
+	// write ngrams
+	var i uint32
+	for ; i < 5; i++ {
+		err := binary.Write(f, binary.LittleEndian, i)
+		if err != nil {
+			log.Println(err)
+			panic(err)
+		}
+	}
+
+	defer f.Close()
+
+	index := make([]string, 0)
 	var w sync.WaitGroup
 	lines := make(chan string, threads)
 	// read input file thread
@@ -124,35 +135,19 @@ func BuildFastText() (e error) {
 	// vector maker thread
 	w.Add(1)
 	go func(chan string) {
-		count := 0
+		var count uint32
 		var wordCount, nGramCount, wGramCount uint32
 
-		type value struct {
-			k []byte
-			v []byte
-		}
-		var values []value
-		write := func() {
-
-			err = db.Update(func(tx *bolt.Tx) error {
-				b, e := tx.CreateBucketIfNotExists([]byte(govector.WORDS_BUCKET))
-				if e != nil {
-					return fmt.Errorf("create bucket error: %s", e)
-				}
-				for _, v := range values {
-					if e = b.Put(v.k, v.v); e != nil {
-						return e
-					}
-				}
-				return nil // commit transaction
-			})
+		write := func(key string, vector [128]float32) {
+			index = append(index, key)
+			err := binary.Write(f, binary.LittleEndian, vector)
 			if err != nil {
-				log.Panicln("error", err)
+				log.Println(err)
 				panic(err)
 			}
-			values = values[:0]
 
 		}
+
 		for line := range lines {
 
 			lineParts := strings.Fields(line)
@@ -168,85 +163,106 @@ func BuildFastText() (e error) {
 			}
 			// normalize vector
 
-			//govector.Sscale(1/govector.L2(vector[:]), vector[:])
-			buf := new(bytes.Buffer)
-			err := binary.Write(buf, binary.LittleEndian, vector)
-			if err != nil {
-				log.Println(err)
-				panic(err)
-			}
+			//buf := new(bytes.Buffer)
+			//err := binary.Write(buf, binary.LittleEndian, vector)
+			//if err != nil {
+			//	log.Println(err)
+			//	panic(err)
+			//}
 			switch lineParts[0] {
 			case "@FWoRd":
-				values = append(values, value{[]byte("0" + lineParts[1]), buf.Bytes()})
+				write("0"+lineParts[1], vector)
 				wordCount++
 			case "@WoRd":
-				values = append(values, value{[]byte("1" + lineParts[1]), buf.Bytes()})
+				write("1"+lineParts[1], vector)
 				wGramCount++
 			case "@NgRaM":
-				values = append(values, value{[]byte("2" + lineParts[1]), buf.Bytes()})
+				write("2"+lineParts[1], vector)
 				nGramCount++
 			default:
 				panic(fmt.Errorf("Wrong format %s", lineParts[0]))
 			}
 
-			if len(values) == 100000 {
-				write()
-			}
 			count++
-			if count%10000 == 0 {
+			if count%100000 == 0 {
 				log.Printf("Found %d vectors %d words %d ngrams %d wgrams\n", count, wordCount, nGramCount, wGramCount)
 			}
 		}
-		if len(values) > 0 {
-			write()
+		// write words
+		for _, w := range index {
+			f.WriteString(w)
+			f.WriteString("\n")
 		}
-		// write wordcount
-		err = db.Update(func(tx *bolt.Tx) error {
-			b, e := tx.CreateBucketIfNotExists([]byte(govector.WORDS_BUCKET))
-
-			if e != nil {
-				return fmt.Errorf("create bucket error: %s", e)
-			}
-			buf := new(bytes.Buffer)
-			err := binary.Write(buf, binary.LittleEndian, wordCount)
-			if err != nil {
-				log.Fatal(err)
-				return err
-			}
-			if err = b.Put([]byte(govector.WORD_COUNT_KEY), buf.Bytes()); err != nil {
-				log.Fatal(err)
-				return err
-			}
-
-			// write ngramcount
-			buf = new(bytes.Buffer)
-			err = binary.Write(buf, binary.LittleEndian, nGramCount)
-			if err != nil {
-				log.Fatal(err)
-				return err
-			}
-			if err = b.Put([]byte(govector.NGRAM_COUNT_KEY), buf.Bytes()); err != nil {
-				log.Fatal(err)
-				return err
-			}
-
-			buf = new(bytes.Buffer)
-			err = binary.Write(buf, binary.LittleEndian, wGramCount)
-			if err != nil {
-				log.Fatal(err)
-				return err
-			}
-			if err = b.Put([]byte(govector.WGRAM_COUNT_KEY), buf.Bytes()); err != nil {
-				log.Fatal(err)
-				return err
-			}
-
-			return nil // commit transaction
-		})
+		// write index totols
+		f.Seek(0, 0)
+		err = binary.Write(f, binary.LittleEndian, count)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalln(err)
 		}
 
+		err = binary.Write(f, binary.LittleEndian, wordCount)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		err = binary.Write(f, binary.LittleEndian, wGramCount)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		err = binary.Write(f, binary.LittleEndian, nGramCount)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		/*
+			// write wordcount
+			err = db.Update(func(tx *bolt.Tx) error {
+				b, e := tx.CreateBucketIfNotExists([]byte(govector.WORDS_BUCKET))
+
+				if e != nil {
+					return fmt.Errorf("create bucket error: %s", e)
+				}
+				buf := new(bytes.Buffer)
+				err := binary.Write(buf, binary.LittleEndian, wordCount)
+				if err != nil {
+					log.Fatal(err)
+					return err
+				}
+				if err = b.Put([]byte(govector.WORD_COUNT_KEY), buf.Bytes()); err != nil {
+					log.Fatal(err)
+					return err
+				}
+
+				// write ngramcount
+				buf = new(bytes.Buffer)
+				err = binary.Write(buf, binary.LittleEndian, nGramCount)
+				if err != nil {
+					log.Fatal(err)
+					return err
+				}
+				if err = b.Put([]byte(govector.NGRAM_COUNT_KEY), buf.Bytes()); err != nil {
+					log.Fatal(err)
+					return err
+				}
+
+				buf = new(bytes.Buffer)
+				err = binary.Write(buf, binary.LittleEndian, wGramCount)
+				if err != nil {
+					log.Fatal(err)
+					return err
+				}
+				if err = b.Put([]byte(govector.WGRAM_COUNT_KEY), buf.Bytes()); err != nil {
+					log.Fatal(err)
+					return err
+				}
+
+				return nil // commit transaction
+			})
+			if err != nil {
+				log.Fatal(err)
+			}
+		*/
 		log.Printf("Found %d vectors total\n", count)
 		log.Printf("Found %d words total\n", wordCount)
 		log.Printf("Found %d n-grams total\n", nGramCount)

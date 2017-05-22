@@ -1,32 +1,21 @@
 package govector
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"runtime/debug"
-	"time"
+	"sort"
 
-	"github.com/boltdb/bolt"
-	"github.com/vseledkin/go-cache"
 	"github.com/vseledkin/govector/index"
-)
-
-const (
-	WORD_COUNT_KEY  = "3_WordCount_"
-	NGRAM_COUNT_KEY = "3_NGramCount_"
-	WGRAM_COUNT_KEY = "3_WGramCount_"
-
-	WORDS_BUCKET = "WORDS_BUCKET"
 )
 
 type Manifold struct {
 	dbfile string
-	bc     *bolt.DB
-	cache  *cache.Cache
+	bc     *FStore
+	cache  *Cache
 	//c := cache.New(5*time.Minute, 30*time.Second)
 }
 
@@ -35,14 +24,15 @@ func NewManifold(dbfile string) (*Manifold, error) {
 	if err == nil {
 		manifold := new(Manifold)
 		manifold.dbfile = dbfile
-		manifold.cache = cache.New(time.Second, 5*time.Second)
+		manifold.cache = NewCache()
 		return manifold, nil
 	}
 	return nil, err
 }
 
 func (m *Manifold) Open() (err error) {
-	m.bc, err = bolt.Open(m.dbfile, 0600, &bolt.Options{ReadOnly: true, Timeout: 10 * time.Second})
+	m.bc = new(FStore)
+	err = m.bc.Open(m.dbfile)
 	return
 }
 
@@ -80,15 +70,23 @@ func (m *Manifold) ComputeNGrams(s string) (ngrams []string) {
 	return сomputeNGrams(s, 3, 6)
 }
 
-func (m *Manifold) llget(key []byte) (v []byte, err error) {
-	err = m.bc.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(WORDS_BUCKET))
-		if b == nil {
-			return fmt.Errorf("bucket %s not found", WORDS_BUCKET)
-		}
-		v = b.Get(key)
-		return nil
-	})
+func (m *Manifold) llget(key []byte) (v []float32, ok bool, err error) {
+	offset, ok := m.bc.index[string(key)]
+	offs := 4*4 + int64(offset)*128*4
+	var off int64
+	off, err = m.bc.vectors.Seek(offs, 0)
+	if err != nil {
+		return nil, false, fmt.Errorf("Seek error: want %d got %d ", offs, off)
+	}
+	var vector [128]float32
+
+	if err = binary.Read(m.bc.vectors, binary.LittleEndian, &vector); err != nil {
+		return nil, false, err
+	}
+
+	v = vector[:]
+	//fmt.Printf("[%s]: [%#v]", string(key), v)
+	ok = true
 	return
 }
 
@@ -96,85 +94,56 @@ func (m *Manifold) GetVector(s string) (v []float32, e error) {
 	if len(s) == 0 {
 		return []float32{}, fmt.Errorf("Empty word")
 	}
-
-	vv, found := m.cache.Get(s)
+	var found bool
+	v, found = m.cache.Get(s)
 	if found {
 		CacheHit++
 		//log.Printf("Hit %s %d", s, m.cache.ItemCount())
-		return vv.([]float32), nil
+		return v, nil
 	}
-	//log.Printf("Miss %s %d", s, m.cache.ItemCount())
-	var byteval []byte
-	if byteval, e = m.llget([]byte("0" + s)); e == nil && len(byteval) > 0 {
-		v, e = m.decodeVector(byteval)
-		if e != nil {
-			//if e != io.EOF {
-			log.Printf("Cannot 0 get word vector [%s] %s", string(byteval), e)
+
+	if v, found, e = m.llget([]byte("0" + s)); e != nil {
+		log.Printf("Error geting vector for word [%s] %s", s, e)
+		return
+	} else if found {
+		CacheMiss++
+		m.cache.Set(s, v)
+		return
+	}
+
+	// we have not found ready vector so compute it from ngrams
+	// get wgram
+	if v, found, e = m.llget([]byte("1" + s)); e != nil {
+		log.Printf("Error geting vector for word [%s] %s", s, e)
+		return
+	}
+
+	// get ngrams
+	var nv []float32
+	for _, ngram := range m.ComputeNGrams("<" + s + ">") {
+		if nv, found, e = m.llget([]byte("2" + ngram)); e != nil {
+			log.Printf("Error geting vector for word [%s] %s", s, e)
 			return
-		}
-	} else {
-		// no precomputed vector found
-		// get wGram
-		if byteval, e = m.llget([]byte("1" + s)); e == nil && len(byteval) > 0 {
-			v, e = m.decodeVector(byteval)
-
-			if e != nil {
-				log.Printf("Cannot 1 get word vector [%s] %s", string(byteval), e)
-				return
-			}
-
-			//log.Printf("VGram: %s %#v", s, v[:6])
-			// got vGram vector vector
-		}
-		// get ngrams
-		for _, ngram := range m.ComputeNGrams("<" + s + ">") {
-			if byteval, e = m.llget([]byte("2" + ngram)); e == nil && len(byteval) > 0 {
-				var nv []float32
-				if nv, e = m.decodeVector(byteval); e != nil {
-					log.Printf("Cannot 2 get word vector %s %s", string(byteval), e)
-					return
-				} else {
-					//log.Printf("NGram: %s %#v", ngram, nv[:6])
-					// we got ngram vector
-					if len(v) > 0 {
-						Sxpy(nv, v)
-					} else {
-						v = nv
-					}
-				}
+		} else if found {
+			if len(v) > 0 {
+				Sxpy(nv, v)
+			} else {
+				v = nv
 			}
 		}
-
-		// normalize
-		if len(v) > 0 {
-			Sscale(1/L2(v), v)
-		}
-
-		//log.Printf("Word: %s %#v", s, v)
-		e = nil
 	}
+
 	if len(v) == 0 {
 		// we have no such characters!!!! at all
 		var emptyVector [128]float32
 		v = emptyVector[:]
 	}
-	//log.Printf("Vector: %s %#v", s, v)
+	if len(v) > 0 {
+		Sscale(1/L2(v), v)
+	}
+
 	CacheMiss++
-	m.cache.Add(s, v, time.Second)
-	return
-}
-
-func (m *Manifold) decodeVector(vb []byte) (v []float32, e error) {
-	if len(vb) == 0 {
-		return nil, fmt.Errorf("No data to decode")
-	}
-	var vector [128]float32
-	buf := bytes.NewReader(vb)
-
-	if e = binary.Read(buf, binary.LittleEndian, &vector); e != nil {
-		return
-	}
-	v = vector[:]
+	m.cache.Set(s, v)
 	return
 }
 
@@ -182,19 +151,19 @@ func (m *Manifold) Dim() int {
 	return 128
 }
 
-func (m *Manifold) HasWord(s string) bool {
-	v, _ := m.llget([]byte("0" + s))
-	return v != nil
+func (m *Manifold) HasWord(s string) (has bool) {
+	_, has = m.bc.index["0"+s]
+	return
 }
 
-func (m *Manifold) HasWGram(s string) bool {
-	v, _ := m.llget([]byte("1" + s))
-	return v != nil
+func (m *Manifold) HasWGram(s string) (has bool) {
+	_, has = m.bc.index["1"+s]
+	return
 }
 
-func (m *Manifold) HasNGram(s string) bool {
-	v, _ := m.llget([]byte("2" + s))
-	return v != nil
+func (m *Manifold) HasNGram(s string) (has bool) {
+	_, has = m.bc.index["2"+s]
+	return
 }
 
 /*
@@ -212,103 +181,86 @@ func (m *Manifold) VisitKeys(visitor func(key string)) {
 }*/
 
 func (m *Manifold) VisitWordsAndVectors(visitor func(key string, vector []float32)) {
-	m.bc.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(WORDS_BUCKET))
-		b.ForEach(func(k, v []byte) error {
-			if k[0] == '0' {
-				if vector, e := m.decodeVector(v); e == nil {
-					visitor(string(k[1:]), vector)
-				}
-			}
-			return nil
-		})
-		return nil
+	rindex := make([]struct {
+		s string
+		o uint32
+	}, m.bc.WordCount)
+	i := 0
+	for k, v := range m.bc.index {
+		if k[0] == '0' {
+			rindex[i] = struct {
+				s string
+				o uint32
+			}{k[1:], v}
+			i++
+		}
+	}
+	sort.Slice(rindex, func(i, j int) bool {
+		return rindex[i].o < rindex[j].o
 	})
+	for _, w := range rindex {
+		vector, e := m.GetVector(w.s)
+		if e != nil {
+			panic(e)
+		}
+		visitor(w.s, vector)
+	}
 }
 
 func (m *Manifold) VisitWords(visitor func(key string)) {
-	m.bc.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket([]byte(WORDS_BUCKET)).Cursor()
-		prefix := []byte{'0'}
-		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+	for k, _ := range m.bc.index {
+		if k[0] == '0' {
 			visitor(string(k[1:]))
 		}
-		return nil
-	})
+	}
 }
 
 func (m *Manifold) VisitNGrams(visitor func(key string, vector []float32)) {
-	m.bc.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(WORDS_BUCKET))
-		b.ForEach(func(k, v []byte) error {
-			if k[0] == '2' {
-				if vector, e := m.decodeVector(v); e == nil {
-					visitor(string(k[1:]), vector)
-				}
-			}
-			return nil
-		})
-		return nil
-	})
+	rindex := make([]string, 0)
+	for k, v := range m.bc.index {
+		if k[0] == '2' {
+			rindex[v] = k[1:]
+		}
+	}
+	for _, w := range rindex {
+		vector, e := m.GetVector(w)
+		if e != nil {
+			panic(e)
+		}
+		visitor(w, vector)
+	}
 }
 
 func (m *Manifold) VisitWGrams(visitor func(key string, vector []float32)) {
-	m.bc.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(WORDS_BUCKET))
-		b.ForEach(func(k, v []byte) error {
-			if k[0] == '1' {
-				if vector, e := m.decodeVector(v); e == nil {
-					visitor(string(k[1:]), vector)
-				}
-			}
-			return nil
-		})
-		return nil
-	})
+	rindex := make([]string, 0)
+	for k, v := range m.bc.index {
+		if k[0] == '1' {
+			rindex[v] = k[1:]
+		}
+	}
+	for _, w := range rindex {
+		vector, e := m.GetVector(w)
+		if e != nil {
+			panic(e)
+		}
+		visitor(w, vector)
+	}
 }
 
 func (m *Manifold) Count() (count uint32) {
-	return m.WordCount() + m.NGramCount()
-
+	return m.bc.TotalCount
 }
 
-func (m *Manifold) WordCount() (count uint32) {
-	b, e := m.llget([]byte(WORD_COUNT_KEY))
-	if e != nil {
-		panic(e)
-	}
-	buf := bytes.NewReader(b)
-	e = binary.Read(buf, binary.LittleEndian, &count)
-	if e != nil {
-		panic(e)
-	}
-	return count
+func (m *Manifold) WordCount() uint32 {
+	return m.bc.WordCount
 }
 
-func (m *Manifold) NGramCount() (count uint32) {
-	b, e := m.llget([]byte(NGRAM_COUNT_KEY))
-	if e != nil {
-		panic(e)
-	}
-	buf := bytes.NewReader(b)
-	e = binary.Read(buf, binary.LittleEndian, &count)
-	if e != nil {
-		panic(e)
-	}
-	return count
+func (m *Manifold) NGramCount() uint32 {
+	return m.bc.NGramCount
 }
 
-func (m *Manifold) WGramCount() (count uint32) {
-	b, e := m.llget([]byte(WGRAM_COUNT_KEY))
-	if e != nil {
-		panic(e)
-	}
-	buf := bytes.NewReader(b)
-	e = binary.Read(buf, binary.LittleEndian, &count)
-	if e != nil {
-		panic(e)
-	}
-	return count
+func (m *Manifold) WGramCount() uint32 {
+	return m.bc.WGramCount
 }
 
 //Angular - cosine distance
@@ -357,7 +309,7 @@ func (m *Manifold) MakeVPIndex() *index.VPTree {
 	})
 	log.Printf("Read %d words", i)
 	idx := index.NewVPTree(m.AngularStr, keys)
-	m.cache.DeleteExpired()
+
 	debug.FreeOSMemory()
 	return idx
 }

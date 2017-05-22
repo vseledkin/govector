@@ -101,10 +101,10 @@ func main() {
 
 	// NEAREST COMMAND ISSUED
 	if nearestCommand.Parsed() {
-		//if word == "" {
-		//	nearestCommand.PrintDefaults()
-		//	return
-		//}
+		if input == "" {
+			nearestCommand.PrintDefaults()
+			return
+		}
 		fmt.Printf("yo")
 		Nearest()
 		return

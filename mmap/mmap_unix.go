@@ -30,16 +30,16 @@ const debug = false
 // Like any io.ReaderAt, clients can execute parallel ReadAt calls, but it is
 // not safe to call Close and reading methods concurrently.
 type ReaderAt struct {
-	data []byte
+	Data []byte
 }
 
 // Close closes the reader.
 func (r *ReaderAt) Close() error {
-	if r.data == nil {
+	if r.Data == nil {
 		return nil
 	}
-	data := r.data
-	r.data = nil
+	data := r.Data
+	r.Data = nil
 	if debug {
 		var p *byte
 		if len(data) != 0 {
@@ -53,23 +53,23 @@ func (r *ReaderAt) Close() error {
 
 // Len returns the length of the underlying memory-mapped file.
 func (r *ReaderAt) Len() int {
-	return len(r.data)
+	return len(r.Data)
 }
 
 // At returns the byte at index i.
 func (r *ReaderAt) At(i int) byte {
-	return r.data[i]
+	return r.Data[i]
 }
 
 // ReadAt implements the io.ReaderAt interface.
 func (r *ReaderAt) ReadAt(p []byte, off int64) (int, error) {
-	if r.data == nil {
+	if r.Data == nil {
 		return 0, errors.New("mmap: closed")
 	}
-	if off < 0 || int64(len(r.data)) < off {
+	if off < 0 || int64(len(r.Data)) < off {
 		return 0, fmt.Errorf("mmap: invalid ReadAt offset %d", off)
 	}
-	n := copy(p, r.data[off:])
+	n := copy(p, r.Data[off:])
 	if n < len(p) {
 		return n, io.EOF
 	}
