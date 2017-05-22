@@ -50,7 +50,7 @@ func Nearest() (e error) {
 	go func() {
 		start := time.Now()
 		idx := manifold.MakeVPIndex()
-		log.Printf("Index built for %d words %s %d metric calls\n", manifold.Count(), time.Now().Sub(start), index.MetricCalls)
+		log.Printf("Index built for %d words %s %d metric calls\n", manifold.WordCount(), time.Now().Sub(start), index.MetricCalls)
 
 		search := func(word string) {
 			index.MetricCalls = 0

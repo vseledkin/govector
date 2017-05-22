@@ -5,9 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
-	"time"
-
-	"github.com/cheggaaa/pb"
 )
 
 //Node VPTree node
@@ -93,7 +90,7 @@ func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
 		MetricCalls++
 		// distance to random median item
 		pivotDist := vp.distanceMetric(items[median], n.Item)
-		//println(pivotDist)
+
 		/*if math.IsNaN(float64(pivotDist)) {
 			fmt.Printf("%#v\n", items[median])
 			fmt.Printf("%#v\n", n.Item)
@@ -143,16 +140,8 @@ func (vp *VPTree) computeDensity(progress bool, k int, cutoff float32, labelProv
 		sync <- &h
 	}
 
-	bar := pb.New(len(vp.ID2node))
-	bar.SetRefreshRate(time.Second)
-	bar.ShowTimeLeft = true
-	bar.ShowSpeed = true
-	if progress {
-		bar.Start()
-	}
-
 	for _, n := range vp.ID2node {
-		bar.Increment()
+
 		go func(n *Node, sync chan *priorityQueue, pq *priorityQueue) {
 			tau := cutoff
 			vp.search(vp.root, n.Item, k, pq, &tau)
@@ -172,9 +161,7 @@ func (vp *VPTree) computeDensity(progress bool, k int, cutoff float32, labelProv
 	for i := 0; i < runtime.NumCPU(); i++ {
 		<-sync
 	}
-	if progress {
-		bar.FinishPrint("Density computation finished!")
-	}
+
 }
 
 // Search searches the VP-tree for the k nearest neighbours of target. It
@@ -259,15 +246,8 @@ func (vp *VPTree) computeDelta(progress bool, k int, cutoff float32, labelProvid
 		sync <- &h
 	}
 
-	bar := pb.New(len(vp.ID2node))
-	bar.SetRefreshRate(time.Second)
-	bar.ShowTimeLeft = true
-	bar.ShowSpeed = true
-	if progress {
-		bar.Start()
-	}
 	for _, n := range vp.ID2node {
-		bar.Increment()
+
 		//if n.Item.Density > 0 && n.Item.Delta == -1 {
 		go func(n *Node, sync chan *priorityQueue, pq *priorityQueue) {
 			tau := cutoff
@@ -296,9 +276,7 @@ func (vp *VPTree) computeDelta(progress bool, k int, cutoff float32, labelProvid
 	for i := 0; i < runtime.NumCPU(); i++ {
 		<-sync
 	}
-	if progress {
-		bar.FinishPrint("Delta computation finished!")
-	}
+
 }
 
 /*
