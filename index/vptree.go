@@ -4,25 +4,23 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"runtime"
 	"strings"
 )
 
 //Node VPTree node
 type Node struct {
-	Item      string
 	Threshold float32
 	Left      *Node
 	Right     *Node
 	Size      int
+	Item      interface{}
 }
 
 // A VPTree struct represents a Vantage-point tree. Vantage-point trees are
 // useful for nearest-neighbour searches in high-dimensional metric spaces.
 type VPTree struct {
-	ID2node        map[string]*Node
 	root           *Node
-	distanceMetric func(x, y string) float32
+	distanceMetric func(x, y interface{}) float32
 }
 
 //MetricCalls increases every time metric of two vectors evaluated
@@ -31,13 +29,12 @@ var MetricCalls int
 // NewVPTree creates a new VP-tree using the metric and items provided. The metric
 // measures the distance between two items, so that the VP-tree can find the
 // nearest neighbour(s) of a target item.
-func NewVPTree(metric func(x, y string) float32, items []string) (t *VPTree) {
+func NewVPTree(metric func(x, y interface{}) float32, items []interface{}) (t *VPTree) {
 	// make copy of items to not damage original data
 	t = &VPTree{
-		ID2node:        make(map[string]*Node, len(items)),
 		distanceMetric: metric,
 	}
-	treeItems := make([]string, len(items))
+	treeItems := make([]interface{}, len(items))
 	copy(treeItems, items)
 	t.root = t.buildFromPoints(treeItems)
 	return
@@ -67,12 +64,7 @@ func (vp *VPTree) PrintTree(n *Node, level, maxLevel int) {
 
 }
 
-//NodeByID extract node by point id
-func (vp *VPTree) NodeByID(id string) *Node {
-	return vp.ID2node[id]
-}
-
-func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
+func (vp *VPTree) buildFromPoints(items []interface{}) (n *Node) {
 	if len(items) == 0 {
 		return nil
 	}
@@ -83,7 +75,7 @@ func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
 	idx := rand.Intn(len(items))
 	n.Item = items[idx]
 	n.Size = len(items)
-	vp.ID2node[n.Item] = n
+
 	// put last element instead of item
 	// remove slice length by 1
 	items[idx], items = items[len(items)-1], items[:len(items)-1]
@@ -128,21 +120,22 @@ func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
 	return
 }
 
+/*
 //ComputeDensity compute density for all points for specific cutoff
 func (vp *VPTree) computeDensity(progress bool, k int, cutoff float32, labelProvider func(id uint32) string) {
 	if k < 1 {
 		return
 	}
 
-	sync := make(chan *priorityQueue, runtime.NumCPU())
+	sync := make(chan *PriorityQueue, runtime.NumCPU())
 	for i := 0; i < runtime.NumCPU(); i++ {
-		h := make(priorityQueue, 0, k)
+		h := make(PriorityQueue, 0, k)
 		sync <- &h
 	}
 
 	for _, n := range vp.ID2node {
 
-		go func(n *Node, sync chan *priorityQueue, pq *priorityQueue) {
+		go func(n *Node, sync chan *PriorityQueue, pq *PriorityQueue) {
 			tau := cutoff
 			vp.search(vp.root, n.Item, k, pq, &tau)
 			//println(len(*pq))
@@ -163,16 +156,16 @@ func (vp *VPTree) computeDensity(progress bool, k int, cutoff float32, labelProv
 	}
 
 }
-
+*/
 // Search searches the VP-tree for the k nearest neighbours of target. It
 // returns the up to k narest neighbours and the corresponding distances in
 // order of least distance to largest distance.
-func (vp *VPTree) Search(target string, k int, cutoff float32) (results []string, distances []float32) {
+func (vp *VPTree) Search(target interface{}, k int, cutoff float32) (results []interface{}, distances []float32) {
 	if k < 1 {
 		return
 	}
 
-	h := make(priorityQueue, 0, k)
+	h := make(PriorityQueue, 0, k)
 	var tau float32 = math.MaxFloat32
 	if cutoff > 0 {
 		tau = cutoff
@@ -196,7 +189,7 @@ func (vp *VPTree) Search(target string, k int, cutoff float32) (results []string
 	return
 }
 
-func (vp *VPTree) search(n *Node, target string, k int, h *priorityQueue, tau *float32) {
+func (vp *VPTree) search(n *Node, target interface{}, k int, h *PriorityQueue, tau *float32) {
 	var d float32
 	if n.Item != target {
 		MetricCalls++
@@ -205,7 +198,7 @@ func (vp *VPTree) search(n *Node, target string, k int, h *priorityQueue, tau *f
 			if len(*h) == k {
 				h.Pop()
 			}
-			h.Push(&heapItem{n.Item, d})
+			h.Push(&HeapItem{n.Item, d})
 
 			if len(*h) == k {
 				*tau = h.Top().Dist
@@ -238,22 +231,23 @@ func (vp *VPTree) search(n *Node, target string, k int, h *priorityQueue, tau *f
 	}
 }
 
+/*
 //ComputeDelta compute delta for all points for specific cutoff
 func (vp *VPTree) computeDelta(progress bool, k int, cutoff float32, labelProvider func(id uint32) string) {
 	if k < 1 {
 		return
 	}
 
-	sync := make(chan *priorityQueue, runtime.NumCPU())
+	sync := make(chan *PriorityQueue, runtime.NumCPU())
 	for i := 0; i < runtime.NumCPU(); i++ {
-		h := make(priorityQueue, 0, k)
+		h := make(PriorityQueue, 0, k)
 		sync <- &h
 	}
 
 	for _, n := range vp.ID2node {
 
 		//if n.Item.Density > 0 && n.Item.Delta == -1 {
-		go func(n *Node, sync chan *priorityQueue, pq *priorityQueue) {
+		go func(n *Node, sync chan *PriorityQueue, pq *PriorityQueue) {
 			tau := cutoff
 			vp.search(vp.root, n.Item, k, pq, &tau)
 
@@ -282,7 +276,7 @@ func (vp *VPTree) computeDelta(progress bool, k int, cutoff float32, labelProvid
 	}
 
 }
-
+*/
 /*
 //Assign assign point to cluster
 func (vp *VPTree) assign(p P.Point, cutoff float32) uint32 {

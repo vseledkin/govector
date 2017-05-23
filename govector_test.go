@@ -7,8 +7,8 @@ import (
 )
 
 func TestGet(t *testing.T) {
-	m, e := NewManifold("/Volumes/data/fasttextmodel/RUEVENTOS/mmmooo")
-	//m, e := NewManifold("/Users/vseledkin/ru.47GB.skipgram.d128.w7.mc5.neg10.e10.b5e6")
+	//m, e := NewManifold("/Volumes/data/fasttextmodel/RUEVENTOS/ru.cbow")
+	m, e := NewManifold("/Users/vseledkin/ru.cbow")
 	if e != nil {
 		t.Fatal(fmt.Errorf("Invalid govector directory: [%s]", e))
 	}
@@ -37,4 +37,20 @@ func TestSplit(t *testing.T) {
 	//if split != want {
 	//t.Fatalf("Split failed want\n%s\ngot\n%s\n", want, split)
 	//}
+}
+
+func TestOptics(t *testing.T) {
+	//m, e := NewManifold("/Volumes/data/fasttextmodel/RUEVENTOS/ru.cbow")
+	m, e := NewManifold("/Users/vseledkin/ru.cbow")
+	if e != nil {
+		t.Fatal(fmt.Errorf("Invalid govector directory: [%s]", e))
+	}
+	e = m.Open()
+	if e != nil {
+		t.Fatal(fmt.Errorf("Invalid govector directory: [%s]", e))
+	}
+	defer m.Close()
+
+	m.ComputeClusters(0.3, 1)
+
 }

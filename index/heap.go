@@ -1,7 +1,7 @@
 package index
 
-type heapItem struct {
-	Item string
+type HeapItem struct {
+	Item interface{}
 	Dist float32
 }
 
@@ -21,7 +21,7 @@ type heapItem struct {
 // Push pushes the element x onto the heap. The complexity is
 // O(log(n)) where n = h.Len().
 //
-func (pq *priorityQueue) Push(x *heapItem) {
+func (pq *PriorityQueue) Push(x *HeapItem) {
 	*pq = append(*pq, x)
 	pq.up(len(*pq) - 1)
 }
@@ -30,7 +30,7 @@ func (pq *priorityQueue) Push(x *heapItem) {
 // and returns it. The complexity is O(log(n)) where n = h.Len().
 // It is equivalent to Remove(h, 0).
 //
-func (pq *priorityQueue) Pop() *heapItem {
+func (pq *PriorityQueue) Pop() *HeapItem {
 	n := len(*pq) - 1
 	pq.Swap(0, n)
 	pq.down(0, n)
@@ -44,7 +44,7 @@ func (pq *priorityQueue) Pop() *heapItem {
 // Remove removes the element at index i from the heap.
 // The complexity is O(log(n)) where n = h.Len().
 //
-func (pq *priorityQueue) Remove(i int) *heapItem {
+func (pq *PriorityQueue) Remove(i int) *HeapItem {
 	n := len(*pq) - 1
 	if n != i {
 		pq.Swap(i, n)
@@ -58,12 +58,20 @@ func (pq *priorityQueue) Remove(i int) *heapItem {
 // Changing the value of the element at index i and then calling Fix is equivalent to,
 // but less expensive than, calling Remove(h, i) followed by a Push of the new value.
 // The complexity is O(log(n)) where n = h.Len().
-func (pq *priorityQueue) Fix(i int) {
+func (pq *PriorityQueue) Fix(i int) {
 	pq.down(i, len(*pq))
 	pq.up(i)
 }
 
-func (pq *priorityQueue) up(j int) {
+func (pq *PriorityQueue) FixItem(item interface{}) {
+	for i, hi := range *pq {
+		if hi.Item == item {
+			pq.Fix(i)
+		}
+	}
+}
+
+func (pq *PriorityQueue) up(j int) {
 	for {
 		i := (j - 1) / 2 // parent
 		if i == j || !pq.Less(j, i) {
@@ -74,7 +82,7 @@ func (pq *priorityQueue) up(j int) {
 	}
 }
 
-func (pq *priorityQueue) down(i, n int) {
+func (pq *PriorityQueue) down(i, n int) {
 	for {
 		j1 := 2*i + 1
 		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
@@ -92,17 +100,17 @@ func (pq *priorityQueue) down(i, n int) {
 	}
 }
 
-type priorityQueue []*heapItem
+type PriorityQueue []*HeapItem
 
-func (pq priorityQueue) Less(i, j int) bool {
+func (pq PriorityQueue) Less(i, j int) bool {
 	// We want a max-heap, so we use greater-than here
 	return pq[i].Dist > pq[j].Dist
 }
 
-func (pq priorityQueue) Swap(i, j int) {
+func (pq PriorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 }
 
-func (pq priorityQueue) Top() *heapItem {
+func (pq PriorityQueue) Top() *HeapItem {
 	return pq[0]
 }

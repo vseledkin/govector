@@ -20,6 +20,7 @@ type Store struct {
 }
 
 func (s *Store) Open(name string) (e error) {
+	fmt.Printf("Open: [%s]\n", name)
 	s.vectors, e = mmap.Open(name)
 	s.index = make(map[string]uint32)
 	// read total number of vectors

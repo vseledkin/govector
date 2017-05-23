@@ -265,25 +265,66 @@ func (m *Manifold) WGramCount() uint32 {
 }
 
 //Angular - cosine distance in the case of vector components are positive or negative
-func (m *Manifold) Angular(x, y []float32) (d float32) {
-	//cosine := float64(Sdot(x, y) / L2(x) / L2(y))
-	d = Sdot(x, y)
-	if d > 1 {
-		log.Printf("Dot of normalized vector > 1", d)
-		return 0
+func (m *Manifold) Angular(x, y interface{}) (d float32) {
+	switch t := x.(type) {
+	case []float32:
+		d = Sdot(t, y.([]float32))
+		if d > 1 {
+			log.Printf("Dot of normalized vector > 1", d)
+			return 0
+		}
+		if d < -1 {
+			log.Printf("Dot of normalized vector < -1", d)
+			return 1
+		}
+		d = float32(math.Acos(float64(d)) / math.Pi)
+		return
+	case *Point:
+		xv, e := m.GetVector(t.Item)
+		if e != nil {
+			panic(e)
+		}
+		yv, e := m.GetVector(y.(*Point).Item)
+		if e != nil {
+			panic(e)
+		}
+		d = Sdot(xv, yv)
+		if d > 1 {
+			log.Printf("Dot of normalized vector > 1", d)
+			return 0
+		}
+		if d < -1 {
+			log.Printf("Dot of normalized vector < -1", d)
+			return 1
+		}
+		d = float32(math.Acos(float64(d)) / math.Pi)
+		return
+	case string:
+		xv, e := m.GetVector(t)
+		if e != nil {
+			panic(e)
+		}
+		yv, e := m.GetVector(y.(string))
+		if e != nil {
+			panic(e)
+		}
+		d = Sdot(xv, yv)
+		if d > 1 {
+			log.Printf("Dot of normalized vector > 1", d)
+			return 0
+		}
+		if d < -1 {
+			log.Printf("Dot of normalized vector < -1", d)
+			return 1
+		}
+		d = float32(math.Acos(float64(d)) / math.Pi)
+		return
+	default:
+		panic(fmt.Errorf("Wrong data type"))
 	}
-	if d < -1 {
-		log.Printf("Dot of normalized vector < -1", d)
-		return 1
-	}
-	d = float32(math.Acos(float64(d)) / math.Pi)
-	if d < 0 {
-		fmt.Printf("dist: %f dot:%f\n", d, Sdot(x, y))
-	}
-
-	return
 }
 
+/*
 //Euclidean
 func (m *Manifold) Euclidean(x, y []float32) (d float32) {
 	//cosine := float64(Sdot(x, y) / L2(x) / L2(y))
@@ -300,19 +341,6 @@ func (m *Manifold) Euclidean(x, y []float32) (d float32) {
 	return
 }
 
-func (m *Manifold) AngularStr(x, y string) (d float32) {
-	xv, e := m.GetVector(x)
-	if e != nil {
-		panic(e)
-	}
-	yv, e := m.GetVector(y)
-	if e != nil {
-		panic(e)
-	}
-	d = m.Angular(xv, yv)
-
-	return
-}
 
 func (m *Manifold) EuclideanStr(x, y string) (d float32) {
 	xv, e := m.GetVector(x)
@@ -327,6 +355,7 @@ func (m *Manifold) EuclideanStr(x, y string) (d float32) {
 
 	return
 }
+*/
 
 func (m *Manifold) MakeVPIndex() *index.VPTree {
 	/*defer func() {
@@ -341,7 +370,7 @@ func (m *Manifold) MakeVPIndex() *index.VPTree {
 	if m.WordCount() < max {
 		max = m.WordCount()
 	}
-	keys := make([]string, max)
+	keys := make([]interface{}, max)
 	log.Printf("Reading %d words", max)
 	var i uint32 = 0
 	m.VisitWords(func(key string) bool {
@@ -364,9 +393,9 @@ func (m *Manifold) MakeVPIndex() *index.VPTree {
 		x := keys[i]
 		y := keys[i+1]
 		z := keys[i+2]
-		dxy := m.AngularStr(x, y)
-		dxz := m.AngularStr(x, z)
-		dyz := m.AngularStr(y, z)
+		dxy := m.Angular(x, y)
+		dxz := m.Angular(x, z)
+		dyz := m.Angular(y, z)
 
 		if dxy > dxz+dyz {
 			panic("Distance function is not metric!")
@@ -381,8 +410,7 @@ func (m *Manifold) MakeVPIndex() *index.VPTree {
 	}
 
 	log.Printf("Read %d words", i)
-	idx := index.NewVPTree(m.AngularStr, keys)
-	//idx := index.NewVPTree(m.EuclideanStr, keys)
+	idx := index.NewVPTree(m.Angular, keys)
 
 	//idx.PrintTree(nil, 0, 100)
 	return idx
