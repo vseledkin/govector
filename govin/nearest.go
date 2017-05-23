@@ -57,7 +57,7 @@ func Nearest() (e error) {
 			govector.CacheHit = 0
 			govector.CacheMiss = 0
 			start := time.Now()
-			words, distances := idx.Search(word, 35, 1)
+			words, distances := idx.Search(word, 35, 0)
 			fmt.Printf("Search for:%s %d metric calls hit:%d miss: %d\n", time.Now().Sub(start), index.MetricCalls, govector.CacheHit, govector.CacheMiss)
 			fmt.Println()
 			fmt.Printf("%12s \n", "Angular")
@@ -74,7 +74,9 @@ func Nearest() (e error) {
 			for {
 				fmt.Printf("query: ")
 				if query, ok := readline(fi); ok {
-					search(query)
+					if len(query) > 0 {
+						search(query)
+					}
 				} else {
 					break
 				}

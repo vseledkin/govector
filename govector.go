@@ -6,7 +6,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"runtime/debug"
 	"sort"
 
 	"github.com/vseledkin/govector/index"
@@ -14,7 +13,7 @@ import (
 
 type Manifold struct {
 	dbfile string
-	bc     *FStore
+	bc     *Store
 	cache  *Cache
 	//c := cache.New(5*time.Minute, 30*time.Second)
 }
@@ -31,7 +30,7 @@ func NewManifold(dbfile string) (*Manifold, error) {
 }
 
 func (m *Manifold) Open() (err error) {
-	m.bc = new(FStore)
+	m.bc = new(Store)
 	err = m.bc.Open(m.dbfile)
 	return
 }
@@ -74,13 +73,13 @@ func (m *Manifold) llget(key []byte) (v []float32, ok bool, err error) {
 	offset, ok := m.bc.index[string(key)]
 	offs := 4*4 + int64(offset)*128*4
 	var off int64
-	off, err = m.bc.vectors.Seek(offs, 0)
+	off, err = m.bc.Reader.Seek(offs, 0)
 	if err != nil {
 		return nil, false, fmt.Errorf("Seek error: want %d got %d ", offs, off)
 	}
 	var vector [128]float32
 
-	if err = binary.Read(m.bc.vectors, binary.LittleEndian, &vector); err != nil {
+	if err = binary.Read(m.bc.Reader, binary.LittleEndian, &vector); err != nil {
 		return nil, false, err
 	}
 
@@ -207,10 +206,12 @@ func (m *Manifold) VisitWordsAndVectors(visitor func(key string, vector []float3
 	}
 }
 
-func (m *Manifold) VisitWords(visitor func(key string)) {
+func (m *Manifold) VisitWords(visitor func(key string) bool) {
 	for k, _ := range m.bc.index {
 		if k[0] == '0' {
-			visitor(string(k[1:]))
+			if !visitor(string(k[1:])) {
+				break
+			}
 		}
 	}
 }
@@ -263,10 +264,40 @@ func (m *Manifold) WGramCount() uint32 {
 	return m.bc.WGramCount
 }
 
-//Angular - cosine distance
-func (m *Manifold) Angular(x, y []float32) float32 {
+//Angular - cosine distance in the case of vector components are positive or negative
+func (m *Manifold) Angular(x, y []float32) (d float32) {
 	//cosine := float64(Sdot(x, y) / L2(x) / L2(y))
-	return float32(2.0 * math.Acos(float64(Sdot(x, y))) / math.Pi)
+	d = Sdot(x, y)
+	if d > 1 {
+		log.Printf("Dot of normalized vector > 1", d)
+		return 0
+	}
+	if d < -1 {
+		log.Printf("Dot of normalized vector < -1", d)
+		return 1
+	}
+	d = float32(math.Acos(float64(d)) / math.Pi)
+	if d < 0 {
+		fmt.Printf("dist: %f dot:%f\n", d, Sdot(x, y))
+	}
+
+	return
+}
+
+//Euclidean
+func (m *Manifold) Euclidean(x, y []float32) (d float32) {
+	//cosine := float64(Sdot(x, y) / L2(x) / L2(y))
+	d = Sdot(x, y)
+	if d > 1 {
+		log.Printf("Dot of normalized vector > 1", d)
+		d = 1
+	}
+	if d < -1 {
+		log.Printf("Dot of normalized vector < -1", d)
+		d = -1
+	}
+	d = float32(math.Sqrt(float64(2.0 * (1.0 - d))))
+	return
 }
 
 func (m *Manifold) AngularStr(x, y string) (d float32) {
@@ -279,9 +310,20 @@ func (m *Manifold) AngularStr(x, y string) (d float32) {
 		panic(e)
 	}
 	d = m.Angular(xv, yv)
-	if d < 0.1 {
-		fmt.Printf("%s %s %f\n", x, y, d)
+
+	return
+}
+
+func (m *Manifold) EuclideanStr(x, y string) (d float32) {
+	xv, e := m.GetVector(x)
+	if e != nil {
+		panic(e)
 	}
+	yv, e := m.GetVector(y)
+	if e != nil {
+		panic(e)
+	}
+	d = m.Euclidean(xv, yv)
 
 	return
 }
@@ -294,22 +336,54 @@ func (m *Manifold) MakeVPIndex() *index.VPTree {
 
 		}
 	}()*/
-	keys := make([]string, m.WordCount())
-	log.Printf("Reading %d words", m.WordCount())
-	i := 0
-	m.VisitWords(func(key string) {
+	//var max uint32 = 1000
+	var max uint32 = m.WordCount()
+	if m.WordCount() < max {
+		max = m.WordCount()
+	}
+	keys := make([]string, max)
+	log.Printf("Reading %d words", max)
+	var i uint32 = 0
+	m.VisitWords(func(key string) bool {
 		if len(key) == 0 {
 			panic(fmt.Errorf("Empty key"))
 		}
 		keys[i] = key
 		i++
+		if i == max {
+			return false
+		}
 		if i%1e4 == 0 {
 			log.Printf("Read %d words", i)
 		}
+		return true
 	})
+	// check triangular inequality
+
+	for i := 0; i < len(keys)-3; i++ {
+		x := keys[i]
+		y := keys[i+1]
+		z := keys[i+2]
+		dxy := m.AngularStr(x, y)
+		dxz := m.AngularStr(x, z)
+		dyz := m.AngularStr(y, z)
+
+		if dxy > dxz+dyz {
+			panic("Distance function is not metric!")
+		}
+
+		if dxz > dxy+dyz {
+			panic("Distance function is not metric!")
+		}
+		if dyz > dxy+dxz {
+			panic("Distance function is not metric!")
+		}
+	}
+
 	log.Printf("Read %d words", i)
 	idx := index.NewVPTree(m.AngularStr, keys)
+	//idx := index.NewVPTree(m.EuclideanStr, keys)
 
-	debug.FreeOSMemory()
+	//idx.PrintTree(nil, 0, 100)
 	return idx
 }

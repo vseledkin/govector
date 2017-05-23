@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"strings"
 )
 
 //Node VPTree node
@@ -43,22 +44,27 @@ func NewVPTree(metric func(x, y string) float32, items []string) (t *VPTree) {
 }
 
 //PrintTree prints tree structure on the console
-func (vp *VPTree) PrintTree(n *Node, level, maxLevel int, labelProvider func(id uint32) string) {
+func (vp *VPTree) PrintTree(n *Node, level, maxLevel int) {
 	if n == nil {
-		vp.PrintTree(vp.root, 0, maxLevel, labelProvider)
-	} else {
-		fmt.Println(level, n.Item, n.Threshold)
-		if level < maxLevel {
-			if n.Left != nil {
-				fmt.Printf("left: %d ", n.Left.Size)
-				vp.PrintTree(n.Left, level+1, maxLevel, labelProvider)
-			}
-			if n.Right != nil {
-				fmt.Printf("right: %d ", n.Right.Size)
-				vp.PrintTree(n.Right, level+1, maxLevel, labelProvider)
-			}
+		n = vp.root
+		fmt.Printf("Tree:\n")
+	}
+	shift := strings.Repeat(" ", level)
+	fmt.Printf("%sNode: %s Size:%d Level:%d Thr:%0.2f\n", shift, n.Item, n.Size, level, n.Threshold)
+
+	if level < maxLevel {
+		level = level + 1
+		shift = strings.Repeat(" ", level)
+		if n.Left != nil {
+			fmt.Printf("%sleft: %d\n", shift, n.Left.Size)
+			vp.PrintTree(n.Left, level, maxLevel)
+		}
+		if n.Right != nil {
+			fmt.Printf("%sright: %d\n", shift, n.Right.Size)
+			vp.PrintTree(n.Right, level, maxLevel)
 		}
 	}
+
 }
 
 //NodeByID extract node by point id
@@ -90,14 +96,8 @@ func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
 		MetricCalls++
 		// distance to random median item
 		pivotDist := vp.distanceMetric(items[median], n.Item)
+		//fmt.Printf("Median l:%d %d %s pivotd: %0.2f\n", len(items), median, items[median], pivotDist)
 
-		/*if math.IsNaN(float64(pivotDist)) {
-			fmt.Printf("%#v\n", items[median])
-			fmt.Printf("%#v\n", n.Item)
-			fmt.Printf("-----CALL-----\n")
-			vp.distanceMetric(items[median], n.Item)
-			panic("")
-		}*/
 		// put median item to the end of slice and
 		// end item replaces previous median
 		items[median], items[len(items)-1] = items[len(items)-1], items[median]
@@ -108,7 +108,7 @@ func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
 			MetricCalls++
 			if vp.distanceMetric(items[i], n.Item) <= pivotDist {
 				// if some item closer than median to the item itself
-				// then put this item to the starting part of a clice
+				// then put this item to the starting part of a slice
 				// and item at storeindex (farer than median) instead of item
 				items[storeIndex], items[i] = items[i], items[storeIndex]
 				storeIndex++
@@ -121,7 +121,7 @@ func (vp *VPTree) buildFromPoints(items []string) (n *Node) {
 		MetricCalls++
 		// we can reuse threshold
 		n.Threshold = pivotDist
-
+		//fmt.Printf("It %s pivotd thresh: %0.2f\n", n.Item, pivotDist)
 		n.Left = vp.buildFromPoints(items[:median])
 		n.Right = vp.buildFromPoints(items[median:])
 	}
@@ -214,21 +214,25 @@ func (vp *VPTree) search(n *Node, target string, k int, h *priorityQueue, tau *f
 	} else {
 		d = 0
 	}
-
+	//fmt.Printf("%s %s %f \n", n.Item, target, d)
 	if d < n.Threshold {
 		if d-*tau <= n.Threshold && n.Left != nil {
+			//fmt.Printf("11 d:%0.2f th:%0.2f tau:%0.2f domain:%s\n", d, n.Threshold, *tau, n.Item)
 			vp.search(n.Left, target, k, h, tau)
 		}
 
 		if d+*tau >= n.Threshold && n.Right != nil {
+			//fmt.Printf("12 d:%0.2f th:%0.2f tau:%0.2f domain:%s\n", d, n.Threshold, *tau, n.Item)
 			vp.search(n.Right, target, k, h, tau)
 		}
 	} else {
 		if d+*tau >= n.Threshold && n.Right != nil {
+			//fmt.Printf("21 d:%0.2f th:%0.2f tau:%0.2f domain:%s\n", d, n.Threshold, *tau, n.Item)
 			vp.search(n.Right, target, k, h, tau)
 		}
 
 		if d-*tau <= n.Threshold && n.Left != nil {
+			//fmt.Printf("22 d:%0.2f th:%0.2f tau:%0.2f domain:%s\n", d, n.Threshold, *tau, n.Item)
 			vp.search(n.Left, target, k, h, tau)
 		}
 	}

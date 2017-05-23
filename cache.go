@@ -1,7 +1,6 @@
 package govector
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
@@ -14,11 +13,11 @@ type Cache struct {
 func NewCache() *Cache {
 	cache := new(Cache)
 	cache.cache = make(map[string][]float32)
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	go func() {
 		for range ticker.C {
 			cache.mu.Lock()
-			fmt.Printf("Cache: %d\n", len(cache.cache))
+			//fmt.Printf("Cache: %d\n", len(cache.cache))
 			cache.cache = make(map[string][]float32)
 			cache.mu.Unlock()
 		}
