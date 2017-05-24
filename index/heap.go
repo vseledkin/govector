@@ -1,116 +1,111 @@
 package index
 
+import (
+	"fmt"
+)
+
 type HeapItem struct {
-	Item interface{}
-	Dist float32
+	Item  interface{}
+	Dist  float32
+	Index int
 }
 
-// A heap must be initialized before any of the heap operations
-// can be used. Init is idempotent with respect to the heap invariants
-// and may be called whenever the heap invariants may have been invalidated.
-// Its complexity is O(n) where n = h.Len().
-//
-//func Init(h Interface) {
-//	// heapify
-//	n := h.Len()
-//	for i := n/2 - 1; i >= 0; i-- {
-//		down(h, i, n)
-//	}
-//}
-
-// Push pushes the element x onto the heap. The complexity is
-// O(log(n)) where n = h.Len().
-//
-func (pq *PriorityQueue) Push(x *HeapItem) {
-	*pq = append(*pq, x)
-	pq.up(len(*pq) - 1)
-}
-
-// Pop removes the minimum element (according to Less) from the heap
-// and returns it. The complexity is O(log(n)) where n = h.Len().
-// It is equivalent to Remove(h, 0).
-//
-func (pq *PriorityQueue) Pop() *HeapItem {
-	n := len(*pq) - 1
-	pq.Swap(0, n)
-	pq.down(0, n)
-	old := *pq
-	n = len(old)
-	item := old[n-1]
-	*pq = old[0 : n-1]
-	return item
-}
-
-// Remove removes the element at index i from the heap.
-// The complexity is O(log(n)) where n = h.Len().
-//
-func (pq *PriorityQueue) Remove(i int) *HeapItem {
-	n := len(*pq) - 1
-	if n != i {
-		pq.Swap(i, n)
-		pq.down(i, n)
-		pq.up(i)
-	}
-	return pq.Pop()
-}
-
-// Fix re-establishes the heap ordering after the element at index i has changed its value.
-// Changing the value of the element at index i and then calling Fix is equivalent to,
-// but less expensive than, calling Remove(h, i) followed by a Push of the new value.
-// The complexity is O(log(n)) where n = h.Len().
-func (pq *PriorityQueue) Fix(i int) {
-	pq.down(i, len(*pq))
-	pq.up(i)
-}
-
-func (pq *PriorityQueue) FixItem(item interface{}) {
-	for i, hi := range *pq {
-		if hi.Item == item {
-			pq.Fix(i)
-		}
-	}
-}
-
-func (pq *PriorityQueue) up(j int) {
-	for {
-		i := (j - 1) / 2 // parent
-		if i == j || !pq.Less(j, i) {
-			break
-		}
-		pq.Swap(i, j)
-		j = i
-	}
-}
-
-func (pq *PriorityQueue) down(i, n int) {
-	for {
-		j1 := 2*i + 1
-		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
-			break
-		}
-		j := j1 // left child
-		if j2 := j1 + 1; j2 < n && !pq.Less(j1, j2) {
-			j = j2 // = 2*i + 2  // right child
-		}
-		if !pq.Less(j, i) {
-			break
-		}
-		pq.Swap(i, j)
-		i = j
-	}
-}
-
+// A PriorityQueue implements heap.Interface and holds Items.
 type PriorityQueue []*HeapItem
 
+func (pq PriorityQueue) Len() int { return len(pq) }
+
 func (pq PriorityQueue) Less(i, j int) bool {
-	// We want a max-heap, so we use greater-than here
+	// We want Pop to give us the highest, not lowest, priority so we use greater than here.
 	return pq[i].Dist > pq[j].Dist
 }
 
 func (pq PriorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].Index = i
+	pq[j].Index = j
 }
 
 func (pq PriorityQueue) Top() *HeapItem {
 	return pq[0]
+}
+
+func (pq *PriorityQueue) Push(x interface{}) {
+	item := x.(*HeapItem)
+	item.Index = len(*pq)
+	*pq = append(*pq, item)
+}
+
+func (pq *PriorityQueue) Pop() interface{} {
+	old := *pq
+	n := len(old)
+	item := old[n-1]
+	item.Index = -1 // for safety
+	*pq = old[0 : n-1]
+	return item
+}
+
+func (pq *PriorityQueue) Find(item interface{}) *HeapItem {
+	for i := range *pq {
+		if (*pq)[i].Item == item {
+			return (*pq)[i]
+		}
+	}
+	panic(fmt.Errorf("Item not found"))
+}
+
+func (pq *PriorityQueue) Print(label func(*HeapItem) string) {
+	for i, hi := range *pq {
+		fmt.Printf("\t%d %d %f %s\n", i, hi.Index, hi.Dist, label(hi))
+	}
+}
+
+// A PriorityQueue implements heap.Interface and holds Items.
+type MinPriorityQueue []*HeapItem
+
+func (pq MinPriorityQueue) Len() int { return len(pq) }
+
+func (pq MinPriorityQueue) Less(i, j int) bool {
+	// We want Pop to give us the lowest, priority so we use less than here.
+	return pq[i].Dist < pq[j].Dist
+}
+
+func (pq MinPriorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].Index = i
+	pq[j].Index = j
+}
+
+func (pq MinPriorityQueue) Top() *HeapItem {
+	return pq[0]
+}
+
+func (pq *MinPriorityQueue) Push(x interface{}) {
+	item := x.(*HeapItem)
+	item.Index = len(*pq)
+	*pq = append(*pq, item)
+}
+
+func (pq *MinPriorityQueue) Pop() interface{} {
+	old := *pq
+	n := len(old)
+	item := old[n-1]
+	item.Index = -1 // for safety
+	*pq = old[0 : n-1]
+	return item
+}
+
+func (pq *MinPriorityQueue) Find(item interface{}) *HeapItem {
+	for i := range *pq {
+		if (*pq)[i].Item == item {
+			return (*pq)[i]
+		}
+	}
+	panic(fmt.Errorf("Item not found"))
+}
+
+func (pq *MinPriorityQueue) Print(label func(*HeapItem) string) {
+	for i, hi := range *pq {
+		fmt.Printf("\t%d %d %f %s\n", i, hi.Index, hi.Dist, label(hi))
+	}
 }

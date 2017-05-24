@@ -1,6 +1,7 @@
 package index
 
 import (
+	"container/heap"
 	"fmt"
 	"math"
 	"math/rand"
@@ -88,6 +89,7 @@ func (vp *VPTree) buildFromPoints(items []interface{}) (n *Node) {
 		MetricCalls++
 		// distance to random median item
 		pivotDist := vp.distanceMetric(items[median], n.Item)
+
 		//fmt.Printf("Median l:%d %d %s pivotd: %0.2f\n", len(items), median, items[median], pivotDist)
 
 		// put median item to the end of slice and
@@ -112,8 +114,11 @@ func (vp *VPTree) buildFromPoints(items []interface{}) (n *Node) {
 		median = storeIndex
 		MetricCalls++
 		// we can reuse threshold
+
 		n.Threshold = pivotDist
-		//fmt.Printf("It %s pivotd thresh: %0.2f\n", n.Item, pivotDist)
+		// save calculations
+		//n.Threshold = vp.distanceMetric(items[median], n.Item)
+
 		n.Left = vp.buildFromPoints(items[:median])
 		n.Right = vp.buildFromPoints(items[median:])
 	}
@@ -174,7 +179,7 @@ func (vp *VPTree) Search(target interface{}, k int, cutoff float32) (results []i
 	vp.search(vp.root, target, k+1, &h, &tau)
 
 	for len(h) > 0 {
-		hi := h.Pop()
+		hi := heap.Pop(&h).(*HeapItem)
 		results = append(results, hi.Item)
 		distances = append(distances, hi.Dist)
 	}
@@ -196,10 +201,9 @@ func (vp *VPTree) search(n *Node, target interface{}, k int, h *PriorityQueue, t
 		d = vp.distanceMetric(n.Item, target)
 		if d < *tau {
 			if len(*h) == k {
-				h.Pop()
+				heap.Pop(h)
 			}
-			h.Push(&HeapItem{n.Item, d})
-
+			heap.Push(h, &HeapItem{n.Item, d, 0})
 			if len(*h) == k {
 				*tau = h.Top().Dist
 			}

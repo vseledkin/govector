@@ -270,11 +270,11 @@ func (m *Manifold) Angular(x, y interface{}) (d float32) {
 	case []float32:
 		d = Sdot(t, y.([]float32))
 		if d > 1 {
-			log.Printf("Dot of normalized vector > 1", d)
+			log.Printf("Dot of normalized vector > 1 %f", d)
 			return 0
 		}
 		if d < -1 {
-			log.Printf("Dot of normalized vector < -1", d)
+			log.Printf("Dot of normalized vector < -1 %f", d)
 			return 1
 		}
 		d = float32(math.Acos(float64(d)) / math.Pi)
@@ -290,11 +290,11 @@ func (m *Manifold) Angular(x, y interface{}) (d float32) {
 		}
 		d = Sdot(xv, yv)
 		if d > 1 {
-			log.Printf("Dot of normalized vector > 1", d)
+			log.Printf("Dot of normalized vector > 1 %f", d)
 			return 0
 		}
 		if d < -1 {
-			log.Printf("Dot of normalized vector < -1", d)
+			log.Printf("Dot of normalized vector < -1 %f", d)
 			return 1
 		}
 		d = float32(math.Acos(float64(d)) / math.Pi)
@@ -310,11 +310,11 @@ func (m *Manifold) Angular(x, y interface{}) (d float32) {
 		}
 		d = Sdot(xv, yv)
 		if d > 1 {
-			log.Printf("Dot of normalized vector > 1", d)
+			log.Printf("Dot of normalized vector > 1 %f", d)
 			return 0
 		}
 		if d < -1 {
-			log.Printf("Dot of normalized vector < -1", d)
+			log.Printf("Dot of normalized vector < -1 %f", d)
 			return 1
 		}
 		d = float32(math.Acos(float64(d)) / math.Pi)
