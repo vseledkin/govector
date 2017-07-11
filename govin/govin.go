@@ -106,7 +106,8 @@ func main() {
 			return
 		}
 		fmt.Printf("yo")
-		Nearest()
+		//Nearest()
+		NearestAnnoy()
 		return
 	}
 }

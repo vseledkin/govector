@@ -51,6 +51,6 @@ func TestOptics(t *testing.T) {
 	}
 	defer m.Close()
 
-	m.ComputeClusters(0.2, 2)
+	m.ComputeClusters(0.15, 4)
 
 }

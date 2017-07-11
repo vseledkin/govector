@@ -176,7 +176,7 @@ func (vp *VPTree) Search(target interface{}, k int, cutoff float32) (results []i
 		tau = cutoff
 	}
 	// we search k + 1 because we will exclude item itself from search result
-	vp.search(vp.root, target, k+1, &h, &tau)
+	vp.search(vp.root, target, k, &h, &tau)
 
 	for len(h) > 0 {
 		hi := heap.Pop(&h).(*HeapItem)
@@ -195,22 +195,19 @@ func (vp *VPTree) Search(target interface{}, k int, cutoff float32) (results []i
 }
 
 func (vp *VPTree) search(n *Node, target interface{}, k int, h *PriorityQueue, tau *float32) {
-	var d float32
-	if n.Item != target {
-		MetricCalls++
-		d = vp.distanceMetric(n.Item, target)
-		if d < *tau {
-			if len(*h) == k {
-				heap.Pop(h)
-			}
-			heap.Push(h, &HeapItem{n.Item, d, 0})
-			if len(*h) == k {
-				*tau = h.Top().Dist
-			}
+	MetricCalls++
+
+	d := vp.distanceMetric(n.Item, target)
+	if d < *tau {
+		if len(*h) == k {
+			heap.Pop(h)
 		}
-	} else {
-		d = 0
+		heap.Push(h, &HeapItem{n.Item, d, 0})
+		if len(*h) == k {
+			*tau = h.Top().Dist
+		}
 	}
+
 	//fmt.Printf("%s %s %f \n", n.Item, target, d)
 	if d < n.Threshold {
 		if d-*tau <= n.Threshold && n.Left != nil {

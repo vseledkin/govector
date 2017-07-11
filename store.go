@@ -12,6 +12,7 @@ import (
 type Store struct {
 	vectors    *mmap.ReaderAt
 	index      map[string]uint32
+	rindex     []string
 	Reader     *bytes.Reader
 	WordCount  uint32
 	NGramCount uint32
@@ -75,6 +76,10 @@ func (s *Store) Open(name string) (e error) {
 			//	break
 			//}
 		}
+	}
+	s.rindex = make([]string, len(s.index))
+	for k, v := range s.index {
+		s.rindex[v] = k
 	}
 	fmt.Printf("%d\n", count)
 
