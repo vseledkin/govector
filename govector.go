@@ -7,11 +7,9 @@ import (
 	"log"
 	"math"
 	"os"
-	"runtime/debug"
 	"time"
 
 	"github.com/boltdb/bolt"
-	"github.com/vseledkin/go-cache"
 	"github.com/vseledkin/govector/index"
 )
 
@@ -26,8 +24,6 @@ const (
 type Manifold struct {
 	dbfile string
 	bc     *bolt.DB
-	cache  *cache.Cache
-	//c := cache.New(5*time.Minute, 30*time.Second)
 }
 
 func NewManifold(dbfile string) (*Manifold, error) {
@@ -35,7 +31,6 @@ func NewManifold(dbfile string) (*Manifold, error) {
 	if err == nil {
 		manifold := new(Manifold)
 		manifold.dbfile = dbfile
-		manifold.cache = cache.New(time.Second, 5*time.Second)
 		return manifold, nil
 	}
 	return nil, err
@@ -97,12 +92,7 @@ func (m *Manifold) GetVector(s string) (v []float32, e error) {
 		return []float32{}, fmt.Errorf("Empty word")
 	}
 
-	vv, found := m.cache.Get(s)
-	if found {
-		CacheHit++
-		//log.Printf("Hit %s %d", s, m.cache.ItemCount())
-		return vv.([]float32), nil
-	}
+
 	//log.Printf("Miss %s %d", s, m.cache.ItemCount())
 	var byteval []byte
 	if byteval, e = m.llget([]byte("0" + s)); e == nil && len(byteval) > 0 {
@@ -156,11 +146,9 @@ func (m *Manifold) GetVector(s string) (v []float32, e error) {
 	if len(v) == 0 {
 		// we have no such characters!!!! at all
 		var emptyVector [128]float32
-		v = emptyVector[:]
+		v = emptyVector[: ]
 	}
-	//log.Printf("Vector: %s %#v", s, v)
-	CacheMiss++
-	m.cache.Add(s, v, time.Second)
+
 	return
 }
 
@@ -357,7 +345,6 @@ func (m *Manifold) MakeVPIndex() *index.VPTree {
 	})
 	log.Printf("Read %d words", i)
 	idx := index.NewVPTree(m.AngularStr, keys)
-	m.cache.DeleteExpired()
-	debug.FreeOSMemory()
+
 	return idx
 }
